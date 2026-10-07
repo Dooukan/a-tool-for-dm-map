@@ -1,75 +1,61 @@
-import { createNoise4D } from 'simplex-noise';
+import { createNoise2D } from 'simplex-noise';
 import alea from 'alea';
 import type { CustomBiome, MapConfig, POI, POIType, TileData } from '../types/map';
 import { DEFAULT_BIOMES } from '../constants/biomes';
-import { getHexNeighborsWrapped, wrappedHexDistance } from './hexMath';
+import { getHexNeighbors, hexDistance, offsetToAxial } from './hexMath';
 
 export function generateWorld(
   config: MapConfig,
   customBiomes: CustomBiome[] = DEFAULT_BIOMES
 ): { tiles: Map<string, TileData>; pois: POI[] } {
   const prng = alea(config.seed);
-  const elevationNoise = createNoise4D(prng);
-  const tempNoise = createNoise4D(prng);
-  const humidityNoise = createNoise4D(prng);
+  const elevationNoise = createNoise2D(prng);
+  const tempNoise = createNoise2D(prng);
+  const humidityNoise = createNoise2D(prng);
 
   const tiles = new Map<string, TileData>();
 
   // Helper key generator
   const getKey = (q: number, r: number) => `${q},${r}`;
 
-  // 1. Generate 3-layer Perlin/Simplex noise for Elevation, Temperature, Humidity
   const cols = config.width;
   const rows = config.height;
 
-  for (let q = 0; q < cols; q++) {
-    for (let r = 0; r < rows; r++) {
-      // 4D Toroidal Noise sampling for 2D wrapping
-      const angleX = (2 * Math.PI * q) / cols;
-      const angleY = (2 * Math.PI * r) / rows;
+  // 1. Generate 3-layer Perlin/Simplex noise in a Rectangular Offset Grid
+  for (let col = 0; col < cols; col++) {
+    for (let row = 0; row < rows; row++) {
+      const { q, r } = offsetToAxial(col, row);
 
-      const scaleE = config.elevationScale * 0.6;
-      const xE = (scaleE / (2 * Math.PI)) * Math.cos(angleX);
-      const yE = (scaleE / (2 * Math.PI)) * Math.sin(angleX);
-      const zE = (scaleE / (2 * Math.PI)) * Math.cos(angleY);
-      const wE = (scaleE / (2 * Math.PI)) * Math.sin(angleY);
+      const nx = col / cols;
+      const ny = row / rows;
 
+      const scaleE = config.elevationScale * 5.0;
       let elev =
-        1.0 * elevationNoise(xE, yE, zE, wE) +
-        0.5 * elevationNoise(xE * 2, yE * 2, zE * 2, wE * 2) +
-        0.25 * elevationNoise(xE * 4, yE * 4, zE * 4, wE * 4);
+        1.0 * elevationNoise(nx * scaleE, ny * scaleE) +
+        0.5 * elevationNoise(nx * scaleE * 2, ny * scaleE * 2) +
+        0.25 * elevationNoise(nx * scaleE * 4, ny * scaleE * 4);
       elev = (elev + 1.5) / 3.0;
       elev = Math.max(0, Math.min(1, elev));
 
-      const scaleT = config.temperatureScale * 0.6;
-      const xT = (scaleT / (2 * Math.PI)) * Math.cos(angleX) + 100;
-      const yT = (scaleT / (2 * Math.PI)) * Math.sin(angleX) + 100;
-      const zT = (scaleT / (2 * Math.PI)) * Math.cos(angleY) + 100;
-      const wT = (scaleT / (2 * Math.PI)) * Math.sin(angleY) + 100;
-
+      const scaleT = config.temperatureScale * 5.0;
       let temp =
-        1.0 * tempNoise(xT, yT, zT, wT) +
-        0.5 * tempNoise(xT * 2, yT * 2, zT * 2, wT * 2);
+        1.0 * tempNoise((nx + 100) * scaleT, (ny + 100) * scaleT) +
+        0.5 * tempNoise((nx + 100) * scaleT * 2, (ny + 100) * scaleT * 2);
       temp = (temp + 1.5) / 3.0;
 
-      // Periodic temperature gradient (cold poles at top/bottom r=0 and r=rows, warm equator at r=rows/2)
-      const latFactor = 0.5 + 0.5 * Math.cos(angleY);
+      // Latitude gradient (colder at row 0 and row max, warmer in middle)
+      const latFactor = 1.0 - Math.abs(ny - 0.5) * 2;
       temp = temp * 0.7 + latFactor * 0.3;
       temp = Math.max(0, Math.min(1, temp));
 
-      const scaleH = config.humidityScale * 0.6;
-      const xH = (scaleH / (2 * Math.PI)) * Math.cos(angleX) + 500;
-      const yH = (scaleH / (2 * Math.PI)) * Math.sin(angleX) + 500;
-      const zH = (scaleH / (2 * Math.PI)) * Math.cos(angleY) + 500;
-      const wH = (scaleH / (2 * Math.PI)) * Math.sin(angleY) + 500;
-
+      const scaleH = config.humidityScale * 5.0;
       let hum =
-        1.0 * humidityNoise(xH, yH, zH, wH) +
-        0.5 * humidityNoise(xH * 2, yH * 2, zH * 2, wH * 2);
+        1.0 * humidityNoise((nx + 500) * scaleH, (ny + 500) * scaleH) +
+        0.5 * humidityNoise((nx + 500) * scaleH * 2, (ny + 500) * scaleH * 2);
       hum = (hum + 1.5) / 3.0;
       hum = Math.max(0, Math.min(1, hum));
 
-      // Fertility formula: high humidity + moderate temperature + reasonable elevation
+      // Fertility formula
       let fertility = hum * (1 - Math.abs(temp - 0.6)) * (elev > 0.3 && elev < 0.85 ? 1 : 0.2);
       fertility = Math.max(0, Math.min(1, fertility));
 
@@ -91,10 +77,10 @@ export function generateWorld(
     }
   }
 
-  // 2. Downhill River Generation Algorithm
+  // 2. Downhill River Generation
   generateRivers(tiles, config, prng);
 
-  // 3. Distance-Maximizing / Repelling POI Placement
+  // 3. Distance-Maximizing & Repelling POI Placement
   const pois = generatePOIs(tiles, config);
 
   return { tiles, pois };
@@ -142,7 +128,7 @@ function generateRivers(tiles: Map<string, TileData>, config: MapConfig, prng: (
 
       if (current.elevation <= 0.3) break;
 
-      const neighbors = getHexNeighborsWrapped(current.q, current.r, config.width, config.height)
+      const neighbors = getHexNeighbors(current.q, current.r)
         .map((n) => tiles.get(getKey(n.q, n.r)))
         .filter((t): t is TileData => t !== undefined && !visited.has(getKey(t.q, t.r)));
 
@@ -205,9 +191,6 @@ function generatePOIs(tiles: Map<string, TileData>, config: MapConfig): POI[] {
   ];
 
   let idCounter = 1;
-
-  // Physics-based placement: Repulsion with friction & Hierarchical attraction
-  // Cities placed first -> Towns attracted to Cities -> Villages attracted to Towns/Cities
   const frictionCoefficient = 1.5;
 
   for (const group of poiTypesList) {
@@ -218,61 +201,46 @@ function generatePOIs(tiles: Map<string, TileData>, config: MapConfig): POI[] {
       for (const tile of landTiles) {
         if (tile.poi) continue;
 
-        // Base desirability score based on fertility and river proximity
         const suitability = tile.fertility * 2.0 + (tile.hasRiver ? 0.8 : 0);
 
-        // 1. Friction-dampened Repulsion from all existing POIs
         let totalRepulsion = 0;
         let minDistanceToOther = Infinity;
 
         for (const existing of pois) {
-          const dist = wrappedHexDistance(
+          const dist = hexDistance(
             { q: tile.q, r: tile.r },
-            { q: existing.q, r: existing.r },
-            config.width,
-            config.height
+            { q: existing.q, r: existing.r }
           );
 
           if (dist < minDistanceToOther) {
             minDistanceToOther = dist;
           }
 
-          // Inverse square law with friction coefficient
           totalRepulsion += 12.0 / (dist * dist + frictionCoefficient);
         }
 
-        // Strict hard repulsion if adjacent or same tile
         if (minDistanceToOther <= 1) continue;
 
-        // 2. Hierarchical Attraction Force
         let totalAttraction = 0;
         if (group.type === 'village') {
-          // Villages attracted to Towns & Cities
           for (const existing of pois) {
             if (existing.type === 'town' || existing.type === 'city') {
-              const dist = wrappedHexDistance(
+              const dist = hexDistance(
                 { q: tile.q, r: tile.r },
-                { q: existing.q, r: existing.r },
-                config.width,
-                config.height
+                { q: existing.q, r: existing.r }
               );
-              // Pull towards hubs within 2..6 hex distance
               if (dist >= 2 && dist <= 6) {
                 totalAttraction += 5.0 / (dist + 1.0);
               }
             }
           }
         } else if (group.type === 'town') {
-          // Towns attracted to Cities
           for (const existing of pois) {
             if (existing.type === 'city') {
-              const dist = wrappedHexDistance(
+              const dist = hexDistance(
                 { q: tile.q, r: tile.r },
-                { q: existing.q, r: existing.r },
-                config.width,
-                config.height
+                { q: existing.q, r: existing.r }
               );
-              // Pull towards cities within 3..8 hex distance
               if (dist >= 3 && dist <= 8) {
                 totalAttraction += 6.0 / (dist + 1.0);
               }
@@ -280,7 +248,6 @@ function generatePOIs(tiles: Map<string, TileData>, config: MapConfig): POI[] {
           }
         }
 
-        // Net score = suitability + attraction - friction_dampened_repulsion + spacing_bonus
         const spacingBonus = minDistanceToOther === Infinity ? 5 : Math.min(minDistanceToOther, 8) * 0.5;
         const score = suitability + totalAttraction - totalRepulsion + spacingBonus;
 
@@ -290,7 +257,6 @@ function generatePOIs(tiles: Map<string, TileData>, config: MapConfig): POI[] {
         }
       }
 
-      // Fallback if no tile met the >1 distance rule (e.g. extremely crowded map)
       if (!bestTile) {
         for (const tile of landTiles) {
           if (!tile.poi) {

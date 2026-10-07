@@ -14,6 +14,21 @@ export function pixelToHex(x: number, y: number, size: number): HexPoint {
   return cubeToAxial(cubeRound(axialToCube({ q, r })));
 }
 
+// Convert rectangular grid offset (col, row) to flat-topped axial (q, r)
+// Odd-q offset layout for rectangular boundary
+export function offsetToAxial(col: number, row: number): HexPoint {
+  const q = col;
+  const r = row - Math.floor(col / 2);
+  return { q, r };
+}
+
+// Convert flat-topped axial (q, r) back to rectangular grid offset (col, row)
+export function axialToOffset(q: number, r: number): { col: number; row: number } {
+  const col = q;
+  const row = r + Math.floor(q / 2);
+  return { col, row };
+}
+
 export function axialToCube(hex: HexPoint): { x: number; y: number; z: number } {
   const x = hex.q;
   const z = hex.r;
@@ -58,34 +73,10 @@ export function getHexNeighbors(q: number, r: number): HexPoint[] {
   return HEX_DIRECTIONS.map((dir) => ({ q: q + dir.q, r: r + dir.r }));
 }
 
-export function getHexNeighborsWrapped(q: number, r: number, width: number, height: number): HexPoint[] {
-  return HEX_DIRECTIONS.map((dir) => {
-    const rawQ = q + dir.q;
-    const rawR = r + dir.r;
-    return {
-      q: ((rawQ % width) + width) % width,
-      r: ((rawR % height) + height) % height,
-    };
-  });
-}
-
 export function hexDistance(a: HexPoint, b: HexPoint): number {
   const ac = axialToCube(a);
   const bc = axialToCube(b);
   return Math.max(Math.abs(ac.x - bc.x), Math.abs(ac.y - bc.y), Math.abs(ac.z - bc.z));
-}
-
-export function wrappedHexDistance(a: HexPoint, b: HexPoint, width: number, height: number): number {
-  let minDistance = Infinity;
-  for (const dq of [-width, 0, width]) {
-    for (const dr of [-height, 0, height]) {
-      const dist = hexDistance(a, { q: b.q + dq, r: b.r + dr });
-      if (dist < minDistance) {
-        minDistance = dist;
-      }
-    }
-  }
-  return minDistance;
 }
 
 // Draw a single flat-topped hexagon path on canvas

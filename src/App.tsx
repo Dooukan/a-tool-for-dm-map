@@ -126,9 +126,7 @@ export function App() {
         const result = findHexPath(
           { q: pathfindingStart.q, r: pathfindingStart.r },
           { q: tile.q, r: tile.r },
-          mapData.tiles,
-          config.width,
-          config.height
+          mapData.tiles
         );
         if (result) {
           setPathHexes(result.path.map((p) => `${p.q},${p.r}`));
@@ -202,7 +200,7 @@ export function App() {
             <h1 className="font-bold text-slate-100 text-base tracking-wide">D&D World Engine</h1>
           </div>
           <span className="text-[10px] bg-indigo-950 border border-indigo-800 text-indigo-300 px-2 py-0.5 rounded font-mono">
-            v1.2 (Repulsion)
+            v1.3 (Rectangular)
           </span>
         </div>
 

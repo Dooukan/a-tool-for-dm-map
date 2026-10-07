@@ -1,12 +1,10 @@
 import type { HexPoint, TileData } from '../types/map';
-import { getHexNeighbors, getHexNeighborsWrapped, hexDistance, wrappedHexDistance } from './hexMath';
+import { getHexNeighbors, hexDistance } from './hexMath';
 
 export function findHexPath(
   startHex: HexPoint,
   targetHex: HexPoint,
-  tiles: Map<string, TileData>,
-  width?: number,
-  height?: number
+  tiles: Map<string, TileData>
 ): { path: HexPoint[]; totalCost: number } | null {
   const getKey = (q: number, r: number) => `${q},${r}`;
 
@@ -27,14 +25,12 @@ export function findHexPath(
   const gScore: Map<string, number> = new Map();
 
   gScore.set(startKey, 0);
-  const calcDist = (a: HexPoint, b: HexPoint) =>
-    width && height ? wrappedHexDistance(a, b, width, height) : hexDistance(a, b);
 
   openSet.set(startKey, {
     key: startKey,
     point: startHex,
     gScore: 0,
-    fScore: calcDist(startHex, targetHex),
+    fScore: hexDistance(startHex, targetHex),
   });
 
   while (openSet.size > 0) {
@@ -65,9 +61,7 @@ export function findHexPath(
 
     openSet.delete(currentKey);
 
-    const neighbors = width && height
-      ? getHexNeighborsWrapped(currentNode.point.q, currentNode.point.r, width, height)
-      : getHexNeighbors(currentNode.point.q, currentNode.point.r);
+    const neighbors = getHexNeighbors(currentNode.point.q, currentNode.point.r);
 
     for (const neighbor of neighbors) {
       const nKey = getKey(neighbor.q, neighbor.r);
@@ -81,7 +75,7 @@ export function findHexPath(
         cameFrom.set(nKey, currentNode.point);
         gScore.set(nKey, tentativeG);
 
-        const fScore = tentativeG + calcDist(neighbor, targetHex);
+        const fScore = tentativeG + hexDistance(neighbor, targetHex);
         openSet.set(nKey, {
           key: nKey,
           point: neighbor,
