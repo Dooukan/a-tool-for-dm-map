@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import type { CustomBiome, Faction, MapLayerMode, MapToken, TileData } from '../types/map';
 import { drawHexagonPath, hexToPixel, pixelToHex } from '../utils/hexMath';
 
@@ -40,45 +40,61 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
-  // Map biome lookup
-  const biomeMap = new Map<string, CustomBiome>();
-  biomes.forEach((b) => biomeMap.set(b.id, b));
+  // Map biome & faction lookups memoized
+  const biomeMap = useMemo(() => {
+    const map = new Map<string, CustomBiome>();
+    biomes.forEach((b) => map.set(b.id, b));
+    return map;
+  }, [biomes]);
 
-  // Map faction lookup
-  const factionMap = new Map<string, Faction>();
-  factions.forEach((f) => factionMap.set(f.id, f));
+  const factionMap = useMemo(() => {
+    const map = new Map<string, Faction>();
+    factions.forEach((f) => map.set(f.id, f));
+    return map;
+  }, [factions]);
+
+  const pathSet = useMemo(() => new Set(pathHexes), [pathHexes]);
 
   // Key generator
   const getKey = (q: number, r: number) => `${q},${r}`;
 
-  // Drawing method
+  // High performance Canvas rendering with Viewport Culling
   const renderMap = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
+    const viewportWidth = canvas.width;
+    const viewportHeight = canvas.height;
+
     // Clear background
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#090d16';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, viewportWidth, viewportHeight);
 
     ctx.save();
     // Apply pan & zoom transform
     ctx.translate(transform.x, transform.y);
     ctx.scale(transform.scale, transform.scale);
 
-    const pathSet = new Set(pathHexes);
+    // Calculate visible bounds in world coordinates for Viewport Culling
+    const minWorldX = -transform.x / transform.scale - hexSize * 2;
+    const maxWorldX = (viewportWidth - transform.x) / transform.scale + hexSize * 2;
+    const minWorldY = -transform.y / transform.scale - hexSize * 2;
+    const maxWorldY = (viewportHeight - transform.y) / transform.scale + hexSize * 2;
 
-    // 1. Draw Tiles
+    // 1. Render Visible Tiles
     tiles.forEach((tile) => {
       const { x: px, y: py } = hexToPixel(tile.q, tile.r, hexSize);
 
-      drawHexagonPath(ctx, px, py, hexSize - 1);
+      // Frustum/Viewport Culling Check
+      if (px < minWorldX || px > maxWorldX || py < minWorldY || py > maxWorldY) {
+        return;
+      }
 
-      // Determine color based on active layer mode
+      drawHexagonPath(ctx, px, py, hexSize - 0.5);
+
       let fillColor = '#1e293b';
-      let strokeColor = 'rgba(255, 255, 255, 0.08)';
 
       if (tile.customColor) {
         fillColor = tile.customColor;
@@ -136,11 +152,11 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.fill();
 
       // Stroke Hex Borders
-      ctx.strokeStyle = strokeColor;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      // 2. Draw Rivers if present
+      // Draw Rivers
       if (tile.hasRiver) {
         ctx.beginPath();
         ctx.arc(px, py, hexSize * 0.35, 0, Math.PI * 2);
@@ -148,7 +164,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.fill();
       }
 
-      // 3. Highlight Path Hexes
+      // Highlight Path Hexes
       if (pathSet.has(getKey(tile.q, tile.r))) {
         drawHexagonPath(ctx, px, py, hexSize - 2);
         ctx.fillStyle = 'rgba(234, 179, 8, 0.45)';
@@ -158,7 +174,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.stroke();
       }
 
-      // 4. Highlight Selected Tile
+      // Highlight Selected Tile
       if (selectedTileKey === getKey(tile.q, tile.r)) {
         drawHexagonPath(ctx, px, py, hexSize - 2);
         ctx.strokeStyle = '#38bdf8';
@@ -166,7 +182,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.stroke();
       }
 
-      // 5. Highlight Hovered Tile
+      // Highlight Hovered Tile
       if (hoveredTile && hoveredTile.q === tile.q && hoveredTile.r === tile.r) {
         drawHexagonPath(ctx, px, py, hexSize - 2);
         ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
@@ -176,7 +192,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.stroke();
       }
 
-      // 6. Draw Icons & Badges (POIs & Custom Symbols)
+      // Draw POI Icons
       if (tile.poi) {
         ctx.font = `${Math.floor(hexSize * 0.9)}px sans-serif`;
         ctx.textAlign = 'center';
@@ -190,7 +206,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.fillText(symbol, px, py);
       }
 
-      // Movement mode number overlay
+      // Movement Overlay
       if (layerMode === 'movement') {
         ctx.font = `bold ${Math.floor(hexSize * 0.6)}px sans-serif`;
         ctx.fillStyle = '#ffffff';
@@ -200,9 +216,11 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     });
 
-    // 7. Draw Map Tokens
+    // Render Tokens
     tokens.forEach((token) => {
       const { x: px, y: py } = hexToPixel(token.q, token.r, hexSize);
+
+      if (px < minWorldX || px > maxWorldX || py < minWorldY || py > maxWorldY) return;
 
       ctx.beginPath();
       ctx.arc(px, py, hexSize * 0.6, 0, Math.PI * 2);
@@ -221,22 +239,27 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     ctx.restore();
   }, [
     tiles,
-    biomes,
-    factions,
+    biomeMap,
+    factionMap,
     tokens,
     layerMode,
     hexSize,
     transform,
     selectedTileKey,
     hoveredTile,
-    pathHexes,
+    pathSet,
   ]);
 
   useEffect(() => {
-    renderMap();
+    let animId: number;
+    const render = () => {
+      renderMap();
+    };
+    animId = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(animId);
   }, [renderMap]);
 
-  // Canvas Mouse Event Handlers for Pan, Zoom, and Tile Interaction
+  // Mouse Event Handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (e.button === 0) {
       setIsDragging(true);

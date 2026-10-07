@@ -1,16 +1,16 @@
 import type { HexPoint } from '../types/map';
 
-// Pointy-topped Hexagon Geometry Math
+// Flat-topped Hexagon Geometry Math
 // Pixel offset logic for rendering hex grid on canvas
 export function hexToPixel(q: number, r: number, size: number): { x: number; y: number } {
-  const x = size * (Math.sqrt(3) * q + (Math.sqrt(3) / 2) * r);
-  const y = size * ((3 / 2) * r);
+  const x = size * ((3 / 2) * q);
+  const y = size * ((Math.sqrt(3) / 2) * q + Math.sqrt(3) * r);
   return { x, y };
 }
 
 export function pixelToHex(x: number, y: number, size: number): HexPoint {
-  const q = ((Math.sqrt(3) / 3) * x - (1 / 3) * y) / size;
-  const r = ((2 / 3) * y) / size;
+  const q = ((2 / 3) * x) / size;
+  const r = ((-1 / 3) * x + (Math.sqrt(3) / 3) * y) / size;
   return cubeToAxial(cubeRound(axialToCube({ q, r })));
 }
 
@@ -64,11 +64,11 @@ export function hexDistance(a: HexPoint, b: HexPoint): number {
   return Math.max(Math.abs(ac.x - bc.x), Math.abs(ac.y - bc.y), Math.abs(ac.z - bc.z));
 }
 
-// Draw a single hexagon path on canvas
+// Draw a single flat-topped hexagon path on canvas
 export function drawHexagonPath(ctx: CanvasRenderingContext2D, centerX: number, centerY: number, size: number) {
   ctx.beginPath();
   for (let i = 0; i < 6; i++) {
-    const angleRad = (Math.PI / 180) * (60 * i - 30); // Pointy top
+    const angleRad = (Math.PI / 180) * (60 * i); // Flat top (0 deg start)
     const x = centerX + size * Math.cos(angleRad);
     const y = centerY + size * Math.sin(angleRad);
     if (i === 0) {

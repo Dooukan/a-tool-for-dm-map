@@ -30,6 +30,7 @@ import {
   Brush,
   Sliders,
   Sparkles,
+  MapPin,
 } from 'lucide-react';
 
 export function App() {
@@ -43,7 +44,7 @@ export function App() {
     temperatureScale: 1.0,
     humidityScale: 1.0,
     riverCount: 5,
-    poiCount: 12,
+    poiCount: 18,
   });
 
   // Active Map Data State
@@ -67,6 +68,7 @@ export function App() {
   const [selectedTileKey, setSelectedTileKey] = useState<string | null>(null);
 
   // Tools & Pathfinding States
+  const [isPathfindingActive, setIsPathfindingActive] = useState(false);
   const [pathfindingStart, setPathfindingStart] = useState<TileData | null>(null);
   const [pathHexes, setPathHexes] = useState<string[]>([]);
   const [pathCost, setPathCost] = useState<number | null>(null);
@@ -114,26 +116,27 @@ export function App() {
       return;
     }
 
-    // Pathfinding Mode
-    if (!pathfindingStart) {
-      setPathfindingStart(tile);
-      setPathHexes([key]);
-      setPathCost(0);
-    } else {
-      // Calculate path from start to target
-      const result = findHexPath(
-        { q: pathfindingStart.q, r: pathfindingStart.r },
-        { q: tile.q, r: tile.r },
-        mapData.tiles
-      );
-      if (result) {
-        setPathHexes(result.path.map((p) => `${p.q},${p.r}`));
-        setPathCost(result.totalCost);
+    // Explicit Pathfinding Mode
+    if (isPathfindingActive) {
+      if (!pathfindingStart) {
+        setPathfindingStart(tile);
+        setPathHexes([key]);
+        setPathCost(0);
       } else {
-        alert('Bu iki nokta arasında geçilebilir bir yol bulunamadı!');
-        setPathfindingStart(null);
-        setPathHexes([]);
-        setPathCost(null);
+        const result = findHexPath(
+          { q: pathfindingStart.q, r: pathfindingStart.r },
+          { q: tile.q, r: tile.r },
+          mapData.tiles
+        );
+        if (result) {
+          setPathHexes(result.path.map((p) => `${p.q},${p.r}`));
+          setPathCost(result.totalCost);
+        } else {
+          alert('Bu iki nokta arasında geçilebilir bir yol bulunamadı!');
+          setPathfindingStart(null);
+          setPathHexes([]);
+          setPathCost(null);
+        }
       }
     }
   };
@@ -197,7 +200,7 @@ export function App() {
             <h1 className="font-bold text-slate-100 text-base tracking-wide">D&D World Engine</h1>
           </div>
           <span className="text-[10px] bg-indigo-950 border border-indigo-800 text-indigo-300 px-2 py-0.5 rounded font-mono">
-            v1.0
+            v1.1 (Flat Hex)
           </span>
         </div>
 
@@ -306,7 +309,10 @@ export function App() {
             <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-3 text-xs">
               <div className="grid grid-cols-2 gap-1.5">
                 <button
-                  onClick={() => setActiveBrush(activeBrush === 'biome' ? 'none' : 'biome')}
+                  onClick={() => {
+                    setIsPathfindingActive(false);
+                    setActiveBrush(activeBrush === 'biome' ? 'none' : 'biome');
+                  }}
                   className={`py-1.5 px-2 rounded font-medium transition border ${
                     activeBrush === 'biome'
                       ? 'bg-amber-600 border-amber-500 text-white'
@@ -316,7 +322,10 @@ export function App() {
                   Biyom Fırçası
                 </button>
                 <button
-                  onClick={() => setActiveBrush(activeBrush === 'river' ? 'none' : 'river')}
+                  onClick={() => {
+                    setIsPathfindingActive(false);
+                    setActiveBrush(activeBrush === 'river' ? 'none' : 'river');
+                  }}
                   className={`py-1.5 px-2 rounded font-medium transition border ${
                     activeBrush === 'river'
                       ? 'bg-sky-600 border-sky-500 text-white'
@@ -326,7 +335,10 @@ export function App() {
                   Nehir Fırçası
                 </button>
                 <button
-                  onClick={() => setActiveBrush(activeBrush === 'faction' ? 'none' : 'faction')}
+                  onClick={() => {
+                    setIsPathfindingActive(false);
+                    setActiveBrush(activeBrush === 'faction' ? 'none' : 'faction');
+                  }}
                   className={`py-1.5 px-2 rounded font-medium transition border col-span-2 ${
                     activeBrush === 'faction'
                       ? 'bg-rose-600 border-rose-500 text-white'
@@ -376,35 +388,59 @@ export function App() {
 
           {/* Pathfinding & Distance Calculator Card */}
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-              <Footprints className="w-4 h-4 text-amber-400" /> Mesafe / Yol Hesabı
-            </label>
-            <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-2 text-xs">
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400">Başlangıç:</span>
-                <span className="font-mono text-indigo-400">
-                  {pathfindingStart ? `(${pathfindingStart.q}, ${pathfindingStart.r})` : 'Seçilmedi'}
-                </span>
-              </div>
-
-              {pathCost !== null && (
-                <div className="flex justify-between items-center pt-2 border-t border-slate-800">
-                  <span className="text-slate-300 font-semibold">Toplam Hareket Puanı:</span>
-                  <span className="font-bold text-amber-400 text-sm">{pathCost} TP</span>
-                </div>
-              )}
-
+            <div className="flex justify-between items-center">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Footprints className="w-4 h-4 text-amber-400" /> Mesafe / Yol Hesabı
+              </label>
               <button
                 onClick={() => {
-                  setPathfindingStart(null);
-                  setPathHexes([]);
-                  setPathCost(null);
+                  const nextState = !isPathfindingActive;
+                  setIsPathfindingActive(nextState);
+                  if (nextState) setActiveBrush('none');
+                  else {
+                    setPathfindingStart(null);
+                    setPathHexes([]);
+                    setPathCost(null);
+                  }
                 }}
-                className="w-full py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 rounded text-[11px]"
+                className={`px-2 py-0.5 rounded text-[11px] font-medium border transition ${
+                  isPathfindingActive
+                    ? 'bg-amber-600 border-amber-500 text-white'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                }`}
               >
-                Yolu Temizle
+                {isPathfindingActive ? 'Açık' : 'Kapalı'}
               </button>
             </div>
+
+            {isPathfindingActive && (
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Başlangıç:</span>
+                  <span className="font-mono text-indigo-400">
+                    {pathfindingStart ? `(${pathfindingStart.q}, ${pathfindingStart.r})` : 'Seçilmedi'}
+                  </span>
+                </div>
+
+                {pathCost !== null && (
+                  <div className="flex justify-between items-center pt-2 border-t border-slate-800">
+                    <span className="text-slate-300 font-semibold">Toplam Hareket Puanı:</span>
+                    <span className="font-bold text-amber-400 text-sm">{pathCost} TP</span>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => {
+                    setPathfindingStart(null);
+                    setPathHexes([]);
+                    setPathCost(null);
+                  }}
+                  className="w-full py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 rounded text-[11px]"
+                >
+                  Yolu Temizle
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Seed & Perlin Noise Generator Settings */}
@@ -443,6 +479,20 @@ export function App() {
                     className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 mb-1 flex items-center gap-1">
+                  <MapPin className="w-3 h-3 text-indigo-400" /> Yerleşim / Şehir Hedef Sayısı ({config.poiCount})
+                </label>
+                <input
+                  type="range"
+                  min="5"
+                  max="50"
+                  value={config.poiCount}
+                  onChange={(e) => setConfig({ ...config, poiCount: parseInt(e.target.value) || 10 })}
+                  className="w-full accent-indigo-500"
+                />
               </div>
 
               <button

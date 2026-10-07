@@ -51,7 +51,7 @@ export function generateWorld(
       hum = (hum + 1.5) / 3.0;
       hum = Math.max(0, Math.min(1, hum));
 
-      // Fertility formula: high humidity + moderate temperature + reasonable elevation (not deep sea, not high mountain)
+      // Fertility formula: high humidity + moderate temperature + reasonable elevation
       let fertility = hum * (1 - Math.abs(temp - 0.6)) * (elev > 0.3 && elev < 0.85 ? 1 : 0.2);
       fertility = Math.max(0, Math.min(1, fertility));
 
@@ -74,17 +74,15 @@ export function generateWorld(
   }
 
   // 2. Downhill River Generation Algorithm
-  // Rivers start at high elevation with high humidity and flow downhill to sea or lowest neighbor
   generateRivers(tiles, config, prng);
 
-  // 3. POI Generation (Cities, Towns, Villages, Camps, Caves, Dungeons) based on fertility and accessibility
+  // 3. Rich POI Generation (Cities, Towns, Villages, Camps, Caves, Dungeons)
   const pois = generatePOIs(tiles, config);
 
   return { tiles, pois };
 }
 
 function matchBiome(elev: number, temp: number, hum: number, customBiomes: CustomBiome[]): CustomBiome {
-  // Find best matching custom biome or default
   for (const biome of customBiomes) {
     if (
       elev >= biome.minElevation &&
@@ -98,7 +96,6 @@ function matchBiome(elev: number, temp: number, hum: number, customBiomes: Custo
     }
   }
 
-  // Fallback if no exact range match
   if (elev < 0.25) return customBiomes.find((b) => b.id === 'deep_ocean') || customBiomes[0];
   if (elev > 0.8) return customBiomes.find((b) => b.id === 'high_mountains') || customBiomes[customBiomes.length - 1];
   return customBiomes.find((b) => b.id === 'grassland') || customBiomes[0];
@@ -108,14 +105,12 @@ function generateRivers(tiles: Map<string, TileData>, config: MapConfig, prng: (
   const getKey = (q: number, r: number) => `${q},${r}`;
   const candidates: TileData[] = [];
 
-  // Potential river sources: high elevation (> 0.6) and high humidity (> 0.5)
   tiles.forEach((tile) => {
     if (tile.elevation > 0.65 && tile.humidity > 0.45) {
       candidates.push(tile);
     }
   });
 
-  // Shuffle & pick top candidates
   candidates.sort(() => prng() - 0.5);
   const sources = candidates.slice(0, config.riverCount);
 
@@ -127,7 +122,6 @@ function generateRivers(tiles: Map<string, TileData>, config: MapConfig, prng: (
       visited.add(getKey(current.q, current.r));
       current.hasRiver = true;
 
-      // Stop if reached sea level
       if (current.elevation <= 0.3) break;
 
       const neighbors = getHexNeighbors(current.q, current.r)
@@ -136,15 +130,12 @@ function generateRivers(tiles: Map<string, TileData>, config: MapConfig, prng: (
 
       if (neighbors.length === 0) break;
 
-      // Sort neighbors by elevation (lowest first)
       neighbors.sort((a, b) => a.elevation - b.elevation);
 
       const lowest = neighbors[0];
-      // Downhill rule: if lowest is strictly lower or slope is small, flow there
       if (lowest.elevation < current.elevation) {
         current = lowest;
       } else {
-        // Flat area: choose a random unvisited neighbor to break tie/meander
         const randomIndex = Math.floor(prng() * neighbors.length);
         current = neighbors[randomIndex];
       }
@@ -155,49 +146,63 @@ function generateRivers(tiles: Map<string, TileData>, config: MapConfig, prng: (
 function generatePOIs(tiles: Map<string, TileData>, config: MapConfig): POI[] {
   const pois: POI[] = [];
 
-  // Filter land tiles suitable for civilization or dungeon
   const landTiles: TileData[] = [];
   tiles.forEach((tile) => {
-    if (tile.elevation > 0.32 && tile.elevation < 0.85) {
+    if (tile.elevation > 0.32 && tile.elevation < 0.88) {
       landTiles.push(tile);
     }
   });
 
   if (landTiles.length === 0) return pois;
 
-  // Score tiles by fertility, river proximity, and moderate elevation
   landTiles.sort((a, b) => {
     const scoreA = a.fertility + (a.hasRiver ? 0.4 : 0);
     const scoreB = b.fertility + (b.hasRiver ? 0.4 : 0);
     return scoreB - scoreA;
   });
 
-  const cityNames = ['Eldoria', 'Valenhold', 'Ironforge', 'Aethelgard', 'Stormwatch', 'Oakhaven', 'Shadowfen', 'Sunspire', 'Silvermoon', 'Dragonreach'];
-  const townNames = ['Riverbend', 'Stonehill', 'Greenfield', 'Crossroads', 'Mistwood', 'Falconcreek', 'Amberfall'];
-  const villageNames = ['Mossybank', 'Whispering Pines', 'Hollow Creek', 'Brambleton', 'Thornbury'];
+  const cityNames = [
+    'Eldoria', 'Valenhold', 'Ironforge', 'Aethelgard', 'Stormwatch', 'Oakhaven', 'Shadowfen',
+    'Sunspire', 'Silvermoon', 'Dragonreach', 'Highgate', 'Winterfell', 'Neverwinter', 'Waterdeep',
+    'Baldurs Gate', 'Aramoor', 'Kraghammer', 'Aurelia', 'Brimstone Capital', 'Vanguard Keep'
+  ];
+
+  const townNames = [
+    'Riverbend', 'Stonehill', 'Greenfield', 'Crossroads', 'Mistwood', 'Falconcreek', 'Amberfall',
+    'Pinehaven', 'Ravencrest', 'Boulderdash', 'Clearwater', 'Goldshire', 'Southshore', 'Moorland'
+  ];
+
+  const villageNames = [
+    'Mossybank', 'Whispering Pines', 'Hollow Creek', 'Brambleton', 'Thornbury', 'Millstone',
+    'Willowbrook', 'Sunfield', 'Deepdell', 'Froggy Bottom', 'Oakhaven Village', 'Rivermouth'
+  ];
+
+  const campNames = ['Bandit Camp', 'Hunter Outpost', 'Nomad Encampment', 'Goblin Lair', 'Mercenary Bivouac', 'Ranger Watchpost'];
+  const caveNames = ['Dark Cavern', 'Crystal Cave', 'Smuggler Cave', 'Echoing Abyss', 'Obsidian Den', 'Batwing Mine'];
+  const dungeonNames = ['Forgotten Ruins', 'Lich Tomb', 'Ancient Catacombs', 'Crypt of Shadows', 'Sunken Temple', 'Dread Stronghold'];
 
   const poiTypesList: { type: POIType; count: number; pool: string[] }[] = [
-    { type: 'city', count: Math.max(1, Math.floor(config.poiCount * 0.15)), pool: cityNames },
-    { type: 'town', count: Math.max(2, Math.floor(config.poiCount * 0.25)), pool: townNames },
-    { type: 'village', count: Math.max(3, Math.floor(config.poiCount * 0.35)), pool: villageNames },
-    { type: 'camp', count: Math.max(1, Math.floor(config.poiCount * 0.1)), pool: ['Bandit Camp', 'Hunter Outpost', 'Nomad Encampment'] },
-    { type: 'cave', count: Math.max(1, Math.floor(config.poiCount * 0.1)), pool: ['Dark Cavern', 'Crystal Cave', 'Smuggler Cave'] },
-    { type: 'dungeon', count: Math.max(1, Math.floor(config.poiCount * 0.1)), pool: ['Forgotten Ruins', 'Lich Tomb', 'Ancient Catacombs'] },
+    { type: 'city', count: Math.max(1, Math.floor(config.poiCount * 0.25)), pool: cityNames },
+    { type: 'town', count: Math.max(2, Math.floor(config.poiCount * 0.3)), pool: townNames },
+    { type: 'village', count: Math.max(2, Math.floor(config.poiCount * 0.25)), pool: villageNames },
+    { type: 'camp', count: Math.max(1, Math.floor(config.poiCount * 0.08)), pool: campNames },
+    { type: 'cave', count: Math.max(1, Math.floor(config.poiCount * 0.06)), pool: caveNames },
+    { type: 'dungeon', count: Math.max(1, Math.floor(config.poiCount * 0.06)), pool: dungeonNames },
   ];
 
   let idCounter = 1;
+  const minSpacing = config.poiCount > 25 ? 1 : config.poiCount > 15 ? 2 : 3;
 
   for (const group of poiTypesList) {
     for (let i = 0; i < group.count; i++) {
-      // Find a land tile that is at least 3 tiles away from any existing POI
       const selectedIndex = landTiles.findIndex((tile) => {
         if (tile.poi) return false;
-        return pois.every((existing) => hexDistance({ q: tile.q, r: tile.r }, { q: existing.q, r: existing.r }) >= 3);
+        return pois.every((existing) => hexDistance({ q: tile.q, r: tile.r }, { q: existing.q, r: existing.r }) >= minSpacing);
       });
 
       if (selectedIndex !== -1) {
         const tile = landTiles[selectedIndex];
-        const name = group.pool[i % group.pool.length] + (i >= group.pool.length ? ` ${i}` : '');
+        const name = group.pool[i % group.pool.length] + (i >= group.pool.length ? ` ${i + 1}` : '');
         const poi: POI = {
           id: `poi_${idCounter++}`,
           name,
