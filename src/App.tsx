@@ -126,7 +126,9 @@ export function App() {
         const result = findHexPath(
           { q: pathfindingStart.q, r: pathfindingStart.r },
           { q: tile.q, r: tile.r },
-          mapData.tiles
+          mapData.tiles,
+          config.width,
+          config.height
         );
         if (result) {
           setPathHexes(result.path.map((p) => `${p.q},${p.r}`));
