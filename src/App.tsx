@@ -200,7 +200,7 @@ export function App() {
             <h1 className="font-bold text-slate-100 text-base tracking-wide">D&D World Engine</h1>
           </div>
           <span className="text-[10px] bg-indigo-950 border border-indigo-800 text-indigo-300 px-2 py-0.5 rounded font-mono">
-            v1.1 (Flat Hex)
+            v1.2 (Repulsion)
           </span>
         </div>
 
@@ -483,15 +483,14 @@ export function App() {
 
               <div>
                 <label className="block text-[10px] text-slate-400 mb-1 flex items-center gap-1">
-                  <MapPin className="w-3 h-3 text-indigo-400" /> Yerleşim / Şehir Hedef Sayısı ({config.poiCount})
+                  <MapPin className="w-3 h-3 text-indigo-400" /> Hedef Yerleşim / Node Sayısı (Sınırsız Tam Sayı)
                 </label>
                 <input
-                  type="range"
-                  min="5"
-                  max="50"
+                  type="number"
+                  min="1"
                   value={config.poiCount}
-                  onChange={(e) => setConfig({ ...config, poiCount: parseInt(e.target.value) || 10 })}
-                  className="w-full accent-indigo-500"
+                  onChange={(e) => setConfig({ ...config, poiCount: Math.max(1, parseInt(e.target.value) || 1) })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
                 />
               </div>
 
