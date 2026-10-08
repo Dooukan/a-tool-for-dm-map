@@ -12,7 +12,7 @@ import type {
 import { DEFAULT_BIOMES } from './constants/biomes';
 import { generateWorld } from './utils/worldGenerator';
 import { MapCanvas } from './components/MapCanvas';
-import { GlobeCanvas } from './components/GlobeCanvas';
+import { IsometricCanvas } from './components/IsometricCanvas';
 import { TileHoverCard } from './components/TileHoverCard';
 import { CustomBiomeEditor } from './components/CustomBiomeEditor';
 import { FactionManager } from './components/FactionManager';
@@ -32,14 +32,13 @@ import {
   Sliders,
   Sparkles,
   MapPin,
-  Globe,
   Grid,
   Mountain,
 } from 'lucide-react';
 
 export function App() {
-  // Map View Mode: '2d' Hex Grid or '3d' Globe
-  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
+  // Map View Mode: 'flat' (Düz 2D) or 'isometric' (2.5D İzometrik)
+  const [viewMode, setViewMode] = useState<'flat' | 'isometric'>('flat');
 
   // Map Config State
   const [config, setConfig] = useState<MapConfig>({
@@ -214,27 +213,27 @@ export function App() {
               <h1 className="font-bold text-slate-100 text-base tracking-wide">D&D World Engine</h1>
             </div>
             <span className="text-[10px] bg-indigo-950 border border-indigo-800 text-indigo-300 px-2 py-0.5 rounded font-mono">
-              v2.0 (Tectonic & 3D)
+              v2.1 (Isometric)
             </span>
           </div>
 
-          {/* 2D Grid / 3D Globe View Mode Switcher */}
+          {/* 2D Flat / 2D Isometric View Mode Switcher */}
           <div className="grid grid-cols-2 gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800 text-xs">
             <button
-              onClick={() => setViewMode('2d')}
+              onClick={() => setViewMode('flat')}
               className={`py-1.5 px-2 rounded font-medium flex items-center justify-center gap-1.5 transition ${
-                viewMode === '2d' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                viewMode === 'flat' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Grid className="w-3.5 h-3.5" /> 2D Hex
+              <Grid className="w-3.5 h-3.5" /> 2D Düz
             </button>
             <button
-              onClick={() => setViewMode('3d')}
+              onClick={() => setViewMode('isometric')}
               className={`py-1.5 px-2 rounded font-medium flex items-center justify-center gap-1.5 transition ${
-                viewMode === '3d' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                viewMode === 'isometric' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Globe className="w-3.5 h-3.5" /> 3D Globe
+              <Layers className="w-3.5 h-3.5" /> 2D İzometrik
             </button>
           </div>
         </div>
@@ -660,9 +659,9 @@ export function App() {
         </div>
       </aside>
 
-      {/* Main Interactive Canvas Area (2D Hex or 3D Globe View) */}
+      {/* Main Interactive Canvas Area (2D Flat Hex or 2D Isometric View) */}
       <main className="flex-1 relative">
-        {viewMode === '2d' ? (
+        {viewMode === 'flat' ? (
           <MapCanvas
             tiles={mapData.tiles}
             biomes={biomes}
@@ -681,14 +680,20 @@ export function App() {
             onTileClick={handleTileClick}
           />
         ) : (
-          <GlobeCanvas
+          <IsometricCanvas
             tiles={mapData.tiles}
             biomes={biomes}
             factions={factions}
+            tokens={tokens}
             layerMode={layerMode}
+            hexSize={config.hexSize}
             width={config.width}
             height={config.height}
             selectedTileKey={selectedTileKey}
+            hoveredTile={hoveredTile}
+            pathHexes={pathHexes}
+            activeBrush={activeBrush}
+            brushColor={activeBrush === 'biome' ? biomes.find((b) => b.id === selectedBrushBiome)?.color || '' : ''}
             onTileHover={setHoveredTile}
             onTileClick={handleTileClick}
           />
