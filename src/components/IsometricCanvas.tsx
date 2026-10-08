@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import type { CustomBiome, Faction, MapLayerMode, MapToken, TileData } from '../types/map';
-import { drawHexagonPath, hexToPixel, pixelToHex } from '../utils/hexMath';
+import { hexToPixel, pixelToHex } from '../utils/hexMath';
 import { RotateCcw, RotateCw, RefreshCw } from 'lucide-react';
 
 interface IsometricCanvasProps {
@@ -63,7 +63,7 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
 
   // Pan, Zoom & Rotation state
   const [transform, setTransform] = useState({ x: window.innerWidth / 2, y: 180, scale: 1.0 });
-  const [rotationAngle, setRotationAngle] = useState<number>(0); // Angle in degrees (0, 45, 90, 180, 270, etc)
+  const [rotationAngle, setRotationAngle] = useState<number>(0);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
@@ -93,10 +93,16 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
       const { x: ax, y: ay } = hexToPixel(a.q, a.r, hexSize);
       const { x: bx, y: by } = hexToPixel(b.q, b.r, hexSize);
 
+      const rotAx = ax * cosRot - ay * sinRot;
       const rotAy = ax * sinRot + ay * cosRot;
+
+      const rotBx = bx * cosRot - by * sinRot;
       const rotBy = bx * sinRot + by * cosRot;
 
-      return rotAy - rotBy;
+      const isoYA = (rotAx + rotAy) * 0.5;
+      const isoYB = (rotBx + rotBy) * 0.5;
+
+      return isoYA - isoYB;
     });
     return arr;
   }, [tiles, hexSize, sinRot, cosRot]);
@@ -117,22 +123,34 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
     ctx.translate(transform.x, transform.y);
     ctx.scale(transform.scale, transform.scale);
 
-    const isoAngle = Math.PI / 6; // 30 degrees
+    const isoAngle = Math.PI / 6; // 30 degrees isometric perspective angle
     const cosIso = Math.cos(isoAngle);
     const sinIso = Math.sin(isoAngle);
-    const maxExtrusion = 50; // Height scaling in pixels based on elevation
+    const maxExtrusion = 40;
+    const baseColumnHeight = 12;
 
     sortedTiles.forEach((tile) => {
       const { x: flatX, y: flatY } = hexToPixel(tile.q, tile.r, hexSize);
 
-      // 1. Rotate in 2D World Plane
-      const rotX = flatX * cosRot - flatY * sinRot;
-      const rotY = flatX * sinRot + flatY * cosRot;
-
-      // 2. Project into Isometric Perspective
-      const isoX = (rotX - rotY) * cosIso;
       const elevationOffset = tile.elevation * maxExtrusion;
-      const isoY = (rotX + rotY) * sinIso * 0.5 - elevationOffset;
+      const prismHeight = baseColumnHeight + elevationOffset;
+
+      // Calculate 6 top surface vertices projected into isometric 3D space
+      const topVertices: { x: number; y: number }[] = [];
+      for (let i = 0; i < 6; i++) {
+        const angleRad = (i * Math.PI) / 3; // Flat-topped hex angles: 0, 60, 120, 180, 240, 300
+        const vx = flatX + hexSize * Math.cos(angleRad);
+        const vy = flatY + hexSize * Math.sin(angleRad);
+
+        // 1. Rotate around world origin
+        const rotVx = vx * cosRot - vy * sinRot;
+        const rotVy = vx * sinRot + vy * cosRot;
+
+        // 2. Isometric projection + height offset
+        const isoVx = (rotVx - rotVy) * cosIso;
+        const isoVy = (rotVx + rotVy) * sinIso * 0.5 - elevationOffset;
+        topVertices.push({ x: isoVx, y: isoVy });
+      }
 
       // Base color calculation
       let fillColor = '#1e293b';
@@ -188,47 +206,58 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
         }
       }
 
-      // Draw 3D Extruded Hex Column Prism Walls
-      if (elevationOffset > 0) {
-        const sideColorLeft = adjustColorBrightness(fillColor, 0.65);
-        const sideColorRight = adjustColorBrightness(fillColor, 0.45);
+      // Draw Extruded 3D Hexagonal Column Side Walls (front-facing faces only)
+      for (let i = 0; i < 6; i++) {
+        const nextI = (i + 1) % 6;
+        const p1 = topVertices[i];
+        const p2 = topVertices[nextI];
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
 
-        // Left pillar wall
-        ctx.beginPath();
-        ctx.moveTo(isoX - hexSize * 0.8, isoY);
-        ctx.lineTo(isoX - hexSize * 0.8, isoY + elevationOffset);
-        ctx.lineTo(isoX, isoY + hexSize * 0.5 + elevationOffset);
-        ctx.lineTo(isoX, isoY + hexSize * 0.5);
-        ctx.closePath();
-        ctx.fillStyle = sideColorLeft;
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-        ctx.stroke();
+        // In 2D screen projection, side faces with dx > 0 face towards the camera
+        if (dx > 0.01) {
+          const p3 = { x: p2.x, y: p2.y + prismHeight };
+          const p4 = { x: p1.x, y: p1.y + prismHeight };
 
-        // Right pillar wall
-        ctx.beginPath();
-        ctx.moveTo(isoX, isoY + hexSize * 0.5);
-        ctx.lineTo(isoX, isoY + hexSize * 0.5 + elevationOffset);
-        ctx.lineTo(isoX + hexSize * 0.8, isoY + elevationOffset);
-        ctx.lineTo(isoX + hexSize * 0.8, isoY);
-        ctx.closePath();
-        ctx.fillStyle = sideColorRight;
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-        ctx.stroke();
+          const wallAngle = Math.atan2(dy, dx);
+          const lightFactor = Math.max(0.35, Math.min(0.85, 0.6 + 0.3 * Math.sin(wallAngle)));
+          const sideColor = adjustColorBrightness(fillColor, lightFactor);
+
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.lineTo(p3.x, p3.y);
+          ctx.lineTo(p4.x, p4.y);
+          ctx.closePath();
+          ctx.fillStyle = sideColor;
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
       }
 
-      // Top Hex Surface
-      drawHexagonPath(ctx, isoX, isoY, hexSize - 0.5);
+      // Draw Top Hex Surface (Flattened into Isometric plane)
+      ctx.beginPath();
+      ctx.moveTo(topVertices[0].x, topVertices[0].y);
+      for (let i = 1; i < 6; i++) {
+        ctx.lineTo(topVertices[i].x, topVertices[i].y);
+      }
+      ctx.closePath();
       ctx.fillStyle = fillColor;
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
       ctx.lineWidth = 1;
       ctx.stroke();
 
       // Path Highlight
       if (pathSet.has(getKey(tile.q, tile.r))) {
-        drawHexagonPath(ctx, isoX, isoY, hexSize - 2);
+        ctx.beginPath();
+        ctx.moveTo(topVertices[0].x, topVertices[0].y);
+        for (let i = 1; i < 6; i++) {
+          ctx.lineTo(topVertices[i].x, topVertices[i].y);
+        }
+        ctx.closePath();
         ctx.fillStyle = 'rgba(234, 179, 8, 0.45)';
         ctx.fill();
         ctx.strokeStyle = '#eab308';
@@ -238,7 +267,12 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
 
       // Selected Tile
       if (selectedTileKey === getKey(tile.q, tile.r)) {
-        drawHexagonPath(ctx, isoX, isoY, hexSize - 2);
+        ctx.beginPath();
+        ctx.moveTo(topVertices[0].x, topVertices[0].y);
+        for (let i = 1; i < 6; i++) {
+          ctx.lineTo(topVertices[i].x, topVertices[i].y);
+        }
+        ctx.closePath();
         ctx.strokeStyle = '#38bdf8';
         ctx.lineWidth = 3;
         ctx.stroke();
@@ -246,7 +280,12 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
 
       // Hovered Tile
       if (hoveredTile && hoveredTile.q === tile.q && hoveredTile.r === tile.r) {
-        drawHexagonPath(ctx, isoX, isoY, hexSize - 2);
+        ctx.beginPath();
+        ctx.moveTo(topVertices[0].x, topVertices[0].y);
+        for (let i = 1; i < 6; i++) {
+          ctx.lineTo(topVertices[i].x, topVertices[i].y);
+        }
+        ctx.closePath();
         ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
         ctx.fill();
         ctx.strokeStyle = '#ffffff';
@@ -256,6 +295,11 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
 
       // POI Icons
       if (tile.poi) {
+        const rotX = flatX * cosRot - flatY * sinRot;
+        const rotY = flatX * sinRot + flatY * cosRot;
+        const isoX = (rotX - rotY) * cosIso;
+        const isoY = (rotX + rotY) * sinIso * 0.5 - elevationOffset;
+
         ctx.font = `${Math.floor(hexSize * 0.85)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -265,7 +309,7 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
         if (tile.poi.type === 'camp') symbol = '⛺';
         if (tile.poi.type === 'cave') symbol = '🕳️';
         if (tile.poi.type === 'dungeon') symbol = '💀';
-        ctx.fillText(symbol, isoX, isoY);
+        ctx.fillText(symbol, isoX, isoY - 2);
       }
     });
 
@@ -283,14 +327,14 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
       const isoY = (rotX + rotY) * sinIso * 0.5 - elev;
 
       ctx.beginPath();
-      ctx.arc(isoX, isoY - 4, hexSize * 0.55, 0, Math.PI * 2);
+      ctx.arc(isoX, isoY - 4, hexSize * 0.45, 0, Math.PI * 2);
       ctx.fillStyle = token.color || '#ec4899';
       ctx.fill();
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      ctx.font = `${Math.floor(hexSize * 0.65)}px sans-serif`;
+      ctx.font = `${Math.floor(hexSize * 0.55)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(token.icon || '♟️', isoX, isoY - 4);
@@ -302,7 +346,6 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
     biomeMap,
     factionMap,
     tokens,
-    tiles,
     layerMode,
     hexSize,
     transform,
