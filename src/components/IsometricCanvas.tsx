@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import type { CustomBiome, Faction, MapLayerMode, MapToken, TileData } from '../types/map';
 import { drawHexagonPath, hexToPixel, pixelToHex } from '../utils/hexMath';
+import { RotateCcw, RotateCw, RefreshCw } from 'lucide-react';
 
 interface IsometricCanvasProps {
   tiles: Map<string, TileData>;
@@ -20,7 +21,6 @@ interface IsometricCanvasProps {
   onTileClick: (tile: TileData) => void;
 }
 
-// Adjust helper color for 3D/Isometric side walls
 function adjustColorBrightness(hexOrRgb: string, factor: number): string {
   if (hexOrRgb.startsWith('#')) {
     let hex = hexOrRgb.slice(1);
@@ -61,8 +61,9 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Pan & Zoom state
-  const [transform, setTransform] = useState({ x: window.innerWidth / 2, y: 150, scale: 1.0 });
+  // Pan, Zoom & Rotation state
+  const [transform, setTransform] = useState({ x: window.innerWidth / 2, y: 180, scale: 1.0 });
+  const [rotationAngle, setRotationAngle] = useState<number>(0); // Angle in degrees (0, 45, 90, 180, 270, etc)
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
@@ -81,16 +82,24 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
   const pathSet = useMemo(() => new Set(pathHexes), [pathHexes]);
   const getKey = (q: number, r: number) => `${q},${r}`;
 
-  // Sort tiles by depth (row then col) so front tiles render over back tiles properly
+  const rad = (rotationAngle * Math.PI) / 180;
+  const cosRot = Math.cos(rad);
+  const sinRot = Math.sin(rad);
+
+  // Depth-sort tiles according to current view rotation angle
   const sortedTiles = useMemo(() => {
     const arr = Array.from(tiles.values());
     arr.sort((a, b) => {
-      const depthA = a.r * 2 + a.q;
-      const depthB = b.r * 2 + b.q;
-      return depthA - depthB;
+      const { x: ax, y: ay } = hexToPixel(a.q, a.r, hexSize);
+      const { x: bx, y: by } = hexToPixel(b.q, b.r, hexSize);
+
+      const rotAy = ax * sinRot + ay * cosRot;
+      const rotBy = bx * sinRot + by * cosRot;
+
+      return rotAy - rotBy;
     });
     return arr;
-  }, [tiles]);
+  }, [tiles, hexSize, sinRot, cosRot]);
 
   const renderIsometricMap = useCallback(() => {
     const canvas = canvasRef.current;
@@ -108,18 +117,22 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
     ctx.translate(transform.x, transform.y);
     ctx.scale(transform.scale, transform.scale);
 
-    const angle = Math.PI / 6; // 30 degrees
-    const cosAngle = Math.cos(angle);
-    const sinAngle = Math.sin(angle);
-    const maxExtrusion = 45; // Height scaling in pixels based on elevation
+    const isoAngle = Math.PI / 6; // 30 degrees
+    const cosIso = Math.cos(isoAngle);
+    const sinIso = Math.sin(isoAngle);
+    const maxExtrusion = 50; // Height scaling in pixels based on elevation
 
     sortedTiles.forEach((tile) => {
       const { x: flatX, y: flatY } = hexToPixel(tile.q, tile.r, hexSize);
 
-      // Isometric transformation
-      const isoX = (flatX - flatY) * cosAngle;
+      // 1. Rotate in 2D World Plane
+      const rotX = flatX * cosRot - flatY * sinRot;
+      const rotY = flatX * sinRot + flatY * cosRot;
+
+      // 2. Project into Isometric Perspective
+      const isoX = (rotX - rotY) * cosIso;
       const elevationOffset = tile.elevation * maxExtrusion;
-      const isoY = (flatX + flatY) * sinAngle * 0.5 - elevationOffset;
+      const isoY = (rotX + rotY) * sinIso * 0.5 - elevationOffset;
 
       // Base color calculation
       let fillColor = '#1e293b';
@@ -175,12 +188,12 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
         }
       }
 
-      // Draw 3D Extruded Pillar Sides if elevation > 0
+      // Draw 3D Extruded Hex Column Prism Walls
       if (elevationOffset > 0) {
         const sideColorLeft = adjustColorBrightness(fillColor, 0.65);
         const sideColorRight = adjustColorBrightness(fillColor, 0.45);
 
-        // Left wall pillar
+        // Left pillar wall
         ctx.beginPath();
         ctx.moveTo(isoX - hexSize * 0.8, isoY);
         ctx.lineTo(isoX - hexSize * 0.8, isoY + elevationOffset);
@@ -192,7 +205,7 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
         ctx.strokeStyle = 'rgba(0,0,0,0.3)';
         ctx.stroke();
 
-        // Right wall pillar
+        // Right pillar wall
         ctx.beginPath();
         ctx.moveTo(isoX, isoY + hexSize * 0.5);
         ctx.lineTo(isoX, isoY + hexSize * 0.5 + elevationOffset);
@@ -212,14 +225,6 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
       ctx.lineWidth = 1;
       ctx.stroke();
-
-      // Rivers
-      if (tile.hasRiver) {
-        ctx.beginPath();
-        ctx.arc(isoX, isoY, hexSize * 0.3, 0, Math.PI * 2);
-        ctx.fillStyle = '#38bdf8';
-        ctx.fill();
-      }
 
       // Path Highlight
       if (pathSet.has(getKey(tile.q, tile.r))) {
@@ -270,8 +275,12 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
       const tile = tiles.get(tileKey);
       const elev = tile ? tile.elevation * maxExtrusion : 0;
       const { x: flatX, y: flatY } = hexToPixel(token.q, token.r, hexSize);
-      const isoX = (flatX - flatY) * cosAngle;
-      const isoY = (flatX + flatY) * sinAngle * 0.5 - elev;
+
+      const rotX = flatX * cosRot - flatY * sinRot;
+      const rotY = flatX * sinRot + flatY * cosRot;
+
+      const isoX = (rotX - rotY) * cosIso;
+      const isoY = (rotX + rotY) * sinIso * 0.5 - elev;
 
       ctx.beginPath();
       ctx.arc(isoX, isoY - 4, hexSize * 0.55, 0, Math.PI * 2);
@@ -297,6 +306,8 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
     layerMode,
     hexSize,
     transform,
+    cosRot,
+    sinRot,
     selectedTileKey,
     hoveredTile,
     pathSet,
@@ -335,17 +346,18 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    // Transform screen coords to world coords
     const worldX = (mouseX - transform.x) / transform.scale;
     const worldY = (mouseY - transform.y) / transform.scale;
 
-    // Inverse Isometric Projection calculation
-    const angle = Math.PI / 6;
-    const cosAngle = Math.cos(angle);
-    const sinAngle = Math.sin(angle);
+    const isoAngle = Math.PI / 6;
+    const cosIso = Math.cos(isoAngle);
+    const sinIso = Math.sin(isoAngle);
 
-    const flatX = (worldX / cosAngle + worldY / (sinAngle * 0.5)) / 2;
-    const flatY = (worldY / (sinAngle * 0.5) - worldX / cosAngle) / 2;
+    const rotX = (worldX / cosIso + worldY / (sinIso * 0.5)) / 2;
+    const rotY = (worldY / (sinIso * 0.5) - worldX / cosIso) / 2;
+
+    const flatX = rotX * cosRot + rotY * sinRot;
+    const flatY = -rotX * sinRot + rotY * cosRot;
 
     const hex = pixelToHex(flatX, flatY, hexSize);
     const tileKey = getKey(hex.q, hex.r);
@@ -371,12 +383,15 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
     const worldX = (mouseX - transform.x) / transform.scale;
     const worldY = (mouseY - transform.y) / transform.scale;
 
-    const angle = Math.PI / 6;
-    const cosAngle = Math.cos(angle);
-    const sinAngle = Math.sin(angle);
+    const isoAngle = Math.PI / 6;
+    const cosIso = Math.cos(isoAngle);
+    const sinIso = Math.sin(isoAngle);
 
-    const flatX = (worldX / cosAngle + worldY / (sinAngle * 0.5)) / 2;
-    const flatY = (worldY / (sinAngle * 0.5) - worldX / cosAngle) / 2;
+    const rotX = (worldX / cosIso + worldY / (sinIso * 0.5)) / 2;
+    const rotY = (worldY / (sinIso * 0.5) - worldX / cosIso) / 2;
+
+    const flatX = rotX * cosRot + rotY * sinRot;
+    const flatY = -rotX * sinRot + rotY * cosRot;
 
     const hex = pixelToHex(flatX, flatY, hexSize);
     const tileKey = getKey(hex.q, hex.r);
@@ -412,8 +427,33 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
         onWheel={handleWheel}
         className="cursor-grab active:cursor-grabbing block"
       />
-      <div className="absolute top-4 left-4 bg-slate-900/80 border border-slate-800 text-slate-300 text-xs px-3 py-1.5 rounded-lg backdrop-blur shadow pointer-events-none">
-        📐 <span className="font-semibold text-indigo-400">2D İzometrik Görünüm</span> (Yükseklik Kabartmalı 2.5D Perspektif)
+
+      {/* Top Banner & Interactive Rotation Control Buttons */}
+      <div className="absolute top-4 left-4 flex items-center gap-2 bg-slate-900/90 border border-slate-800 text-slate-300 text-xs px-3 py-2 rounded-xl backdrop-blur shadow-xl">
+        <span>📐 <span className="font-semibold text-indigo-400">2D İzometrik Prizma Görünümü</span></span>
+        <div className="h-4 w-[1px] bg-slate-700 mx-1" />
+        <button
+          onClick={() => setRotationAngle((prev) => (prev - 45 + 360) % 360)}
+          className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center gap-1 transition"
+          title="Sola 45° Döndür"
+        >
+          <RotateCcw className="w-3.5 h-3.5 text-indigo-400" /> -45°
+        </button>
+        <button
+          onClick={() => setRotationAngle((prev) => (prev + 45) % 360)}
+          className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center gap-1 transition"
+          title="Sağa 45° Döndür"
+        >
+          <RotateCw className="w-3.5 h-3.5 text-indigo-400" /> +45°
+        </button>
+        <button
+          onClick={() => setRotationAngle(0)}
+          className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded flex items-center transition"
+          title="Açıyı Sıfırla"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+        </button>
+        <span className="font-mono text-[11px] text-amber-400 ml-1">{rotationAngle}°</span>
       </div>
     </div>
   );

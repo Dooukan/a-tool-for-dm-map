@@ -173,6 +173,8 @@ function matchBiome(elev: number, temp: number, hum: number, customBiomes: Custo
 }
 
 function generateRivers(tiles: Map<string, TileData>, config: MapConfig, prng: () => number) {
+  if (!config.riverCount || config.riverCount <= 0) return;
+
   const getKey = (q: number, r: number) => `${q},${r}`;
   const candidates: TileData[] = [];
 

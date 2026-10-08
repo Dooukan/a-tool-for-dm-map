@@ -49,7 +49,7 @@ export function App() {
     elevationScale: 1.0,
     temperatureScale: 1.0,
     humidityScale: 1.0,
-    riverCount: 5,
+    riverCount: 0,
     poiCount: 18,
     octaves: 4,
     persistence: 0.5,
