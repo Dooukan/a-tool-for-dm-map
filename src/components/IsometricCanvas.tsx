@@ -62,7 +62,7 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Pan, Zoom & Rotation state
-  const [transform, setTransform] = useState({ x: window.innerWidth / 2, y: 180, scale: 1.0 });
+  const [transform, setTransform] = useState({ x: window.innerWidth / 2, y: 220, scale: 1.0 });
   const [rotationAngle, setRotationAngle] = useState<number>(0);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -82,11 +82,16 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
   const pathSet = useMemo(() => new Set(pathHexes), [pathHexes]);
   const getKey = (q: number, r: number) => `${q},${r}`;
 
+  // Camera view angle in radians
   const rad = (rotationAngle * Math.PI) / 180;
   const cosRot = Math.cos(rad);
   const sinRot = Math.sin(rad);
 
-  // Depth-sort tiles according to current view rotation angle
+  // Isometric projection constants: 30 degree angle (cos=sqrt(3)/2, sin=0.5)
+  const cosIso = Math.cos(Math.PI / 6); // ~0.866025
+  const sinIso = Math.sin(Math.PI / 6); // 0.5
+
+  // Depth-sort tiles according to isometric ground projection
   const sortedTiles = useMemo(() => {
     const arr = Array.from(tiles.values());
     arr.sort((a, b) => {
@@ -99,13 +104,16 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
       const rotBx = bx * cosRot - by * sinRot;
       const rotBy = bx * sinRot + by * cosRot;
 
-      const isoYA = (rotAx + rotAy) * 0.5;
-      const isoYB = (rotBx + rotBy) * 0.5;
+      const groundYA = (rotAx + rotAy) * sinIso;
+      const groundYB = (rotBx + rotBy) * sinIso;
 
-      return isoYA - isoYB;
+      if (Math.abs(groundYA - groundYB) > 0.01) {
+        return groundYA - groundYB;
+      }
+      return a.elevation - b.elevation;
     });
     return arr;
-  }, [tiles, hexSize, sinRot, cosRot]);
+  }, [tiles, hexSize, sinRot, cosRot, sinIso]);
 
   const renderIsometricMap = useCallback(() => {
     const canvas = canvasRef.current;
@@ -123,11 +131,8 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
     ctx.translate(transform.x, transform.y);
     ctx.scale(transform.scale, transform.scale);
 
-    const isoAngle = Math.PI / 6; // 30 degrees isometric perspective angle
-    const cosIso = Math.cos(isoAngle);
-    const sinIso = Math.sin(isoAngle);
-    const maxExtrusion = 40;
-    const baseColumnHeight = 12;
+    const maxExtrusion = 45;
+    const baseColumnHeight = 14;
 
     sortedTiles.forEach((tile) => {
       const { x: flatX, y: flatY } = hexToPixel(tile.q, tile.r, hexSize);
@@ -135,20 +140,20 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
       const elevationOffset = tile.elevation * maxExtrusion;
       const prismHeight = baseColumnHeight + elevationOffset;
 
-      // Calculate 6 top surface vertices projected into isometric 3D space
+      // 1. Calculate 6 top surface vertices projected into isometric 3D space
       const topVertices: { x: number; y: number }[] = [];
       for (let i = 0; i < 6; i++) {
-        const angleRad = (i * Math.PI) / 3; // Flat-topped hex angles: 0, 60, 120, 180, 240, 300
+        const angleRad = (i * Math.PI) / 3; // Flat-topped hex angles: 0°, 60°, 120°, 180°, 240°, 300°
         const vx = flatX + hexSize * Math.cos(angleRad);
         const vy = flatY + hexSize * Math.sin(angleRad);
 
-        // 1. Rotate around world origin
+        // World rotation around origin
         const rotVx = vx * cosRot - vy * sinRot;
         const rotVy = vx * sinRot + vy * cosRot;
 
-        // 2. Isometric projection + height offset
+        // Exact Isometric Projection (2:1 aspect ratio)
         const isoVx = (rotVx - rotVy) * cosIso;
-        const isoVy = (rotVx + rotVy) * sinIso * 0.5 - elevationOffset;
+        const isoVy = (rotVx + rotVy) * sinIso - elevationOffset;
         topVertices.push({ x: isoVx, y: isoVy });
       }
 
@@ -206,7 +211,7 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
         }
       }
 
-      // Draw Extruded 3D Hexagonal Column Side Walls (front-facing faces only)
+      // Draw Extruded 3D Hexagonal Column Side Walls (front-facing faces)
       for (let i = 0; i < 6; i++) {
         const nextI = (i + 1) % 6;
         const p1 = topVertices[i];
@@ -214,13 +219,14 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
         const dx = p2.x - p1.x;
         const dy = p2.y - p1.y;
 
-        // In 2D screen projection, side faces with dx > 0 face towards the camera
-        if (dx > 0.01) {
+        // In 2D screen projection, side faces with dx > 0 face towards the camera (clockwise winding order)
+        if (dx > 0.001) {
           const p3 = { x: p2.x, y: p2.y + prismHeight };
           const p4 = { x: p1.x, y: p1.y + prismHeight };
 
+          // Directional normal lighting calculation
           const wallAngle = Math.atan2(dy, dx);
-          const lightFactor = Math.max(0.35, Math.min(0.85, 0.6 + 0.3 * Math.sin(wallAngle)));
+          const lightFactor = Math.max(0.35, Math.min(0.85, 0.6 + 0.35 * Math.sin(wallAngle)));
           const sideColor = adjustColorBrightness(fillColor, lightFactor);
 
           ctx.beginPath();
@@ -231,13 +237,13 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
           ctx.closePath();
           ctx.fillStyle = sideColor;
           ctx.fill();
-          ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
           ctx.lineWidth = 1;
           ctx.stroke();
         }
       }
 
-      // Draw Top Hex Surface (Flattened into Isometric plane)
+      // Draw Top Hex Surface (Flat-topped hex projected into Isometric plane)
       ctx.beginPath();
       ctx.moveTo(topVertices[0].x, topVertices[0].y);
       for (let i = 1; i < 6; i++) {
@@ -265,7 +271,7 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
         ctx.stroke();
       }
 
-      // Selected Tile
+      // Selected Tile Highlight
       if (selectedTileKey === getKey(tile.q, tile.r)) {
         ctx.beginPath();
         ctx.moveTo(topVertices[0].x, topVertices[0].y);
@@ -278,7 +284,7 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
         ctx.stroke();
       }
 
-      // Hovered Tile
+      // Hovered Tile Highlight
       if (hoveredTile && hoveredTile.q === tile.q && hoveredTile.r === tile.r) {
         ctx.beginPath();
         ctx.moveTo(topVertices[0].x, topVertices[0].y);
@@ -298,7 +304,7 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
         const rotX = flatX * cosRot - flatY * sinRot;
         const rotY = flatX * sinRot + flatY * cosRot;
         const isoX = (rotX - rotY) * cosIso;
-        const isoY = (rotX + rotY) * sinIso * 0.5 - elevationOffset;
+        const isoY = (rotX + rotY) * sinIso - elevationOffset;
 
         ctx.font = `${Math.floor(hexSize * 0.85)}px sans-serif`;
         ctx.textAlign = 'center';
@@ -324,7 +330,7 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
       const rotY = flatX * sinRot + flatY * cosRot;
 
       const isoX = (rotX - rotY) * cosIso;
-      const isoY = (rotX + rotY) * sinIso * 0.5 - elev;
+      const isoY = (rotX + rotY) * sinIso - elev;
 
       ctx.beginPath();
       ctx.arc(isoX, isoY - 4, hexSize * 0.45, 0, Math.PI * 2);
@@ -351,6 +357,8 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
     transform,
     cosRot,
     sinRot,
+    cosIso,
+    sinIso,
     selectedTileKey,
     hoveredTile,
     pathSet,
@@ -365,6 +373,34 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
     return () => cancelAnimationFrame(animId);
   }, [renderIsometricMap]);
 
+  // Exact inverse raycasting from screen mouse coordinates to world axial hex coordinates
+  const getHexAtMouse = useCallback(
+    (clientX: number, clientY: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = clientX - rect.left;
+      const mouseY = clientY - rect.top;
+
+      // Un-project pan & zoom
+      const screenX = (mouseX - transform.x) / transform.scale;
+      const screenY = (mouseY - transform.y) / transform.scale;
+
+      // Exact inverse isometric projection
+      const rotX = 0.5 * (screenX / cosIso + screenY / sinIso);
+      const rotY = 0.5 * (screenY / sinIso - screenX / cosIso);
+
+      // Un-rotate by camera rotation angle (-rad)
+      const flatX = rotX * cosRot + rotY * sinRot;
+      const flatY = -rotX * sinRot + rotY * cosRot;
+
+      const hex = pixelToHex(flatX, flatY, hexSize);
+      return getKey(hex.q, hex.r);
+    },
+    [transform, cosIso, sinIso, cosRot, sinRot, hexSize]
+  );
+
   // Event Handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (e.button === 0) {
@@ -374,9 +410,6 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
     if (isDragging) {
       setTransform((prev) => ({
         ...prev,
@@ -385,61 +418,16 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
       }));
     }
 
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    const worldX = (mouseX - transform.x) / transform.scale;
-    const worldY = (mouseY - transform.y) / transform.scale;
-
-    const isoAngle = Math.PI / 6;
-    const cosIso = Math.cos(isoAngle);
-    const sinIso = Math.sin(isoAngle);
-
-    const rotX = (worldX / cosIso + worldY / (sinIso * 0.5)) / 2;
-    const rotY = (worldY / (sinIso * 0.5) - worldX / cosIso) / 2;
-
-    const flatX = rotX * cosRot + rotY * sinRot;
-    const flatY = -rotX * sinRot + rotY * cosRot;
-
-    const hex = pixelToHex(flatX, flatY, hexSize);
-    const tileKey = getKey(hex.q, hex.r);
-    const tile = tiles.get(tileKey);
-
-    if (tile) {
-      onTileHover(tile);
-    } else {
-      onTileHover(null);
-    }
+    const tileKey = getHexAtMouse(e.clientX, e.clientY);
+    const tile = tileKey ? tiles.get(tileKey) || null : null;
+    onTileHover(tile);
   };
 
   const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
     setIsDragging(false);
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    const worldX = (mouseX - transform.x) / transform.scale;
-    const worldY = (mouseY - transform.y) / transform.scale;
-
-    const isoAngle = Math.PI / 6;
-    const cosIso = Math.cos(isoAngle);
-    const sinIso = Math.sin(isoAngle);
-
-    const rotX = (worldX / cosIso + worldY / (sinIso * 0.5)) / 2;
-    const rotY = (worldY / (sinIso * 0.5) - worldX / cosIso) / 2;
-
-    const flatX = rotX * cosRot + rotY * sinRot;
-    const flatY = -rotX * sinRot + rotY * cosRot;
-
-    const hex = pixelToHex(flatX, flatY, hexSize);
-    const tileKey = getKey(hex.q, hex.r);
-    const tile = tiles.get(tileKey);
-
+    const tileKey = getHexAtMouse(e.clientX, e.clientY);
+    const tile = tileKey ? tiles.get(tileKey) || null : null;
     if (tile) {
       onTileClick(tile);
     }
@@ -476,27 +464,41 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
         <span>📐 <span className="font-semibold text-indigo-400">2D İzometrik Prizma Görünümü</span></span>
         <div className="h-4 w-[1px] bg-slate-700 mx-1" />
         <button
+          onClick={() => setRotationAngle((prev) => (prev - 90 + 360) % 360)}
+          className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center gap-0.5 transition"
+          title="-90° Döndür"
+        >
+          <RotateCcw className="w-3.5 h-3.5 text-indigo-400" /> -90°
+        </button>
+        <button
           onClick={() => setRotationAngle((prev) => (prev - 45 + 360) % 360)}
-          className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center gap-1 transition"
-          title="Sola 45° Döndür"
+          className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center gap-0.5 transition"
+          title="-45° Döndür"
         >
           <RotateCcw className="w-3.5 h-3.5 text-indigo-400" /> -45°
         </button>
         <button
           onClick={() => setRotationAngle((prev) => (prev + 45) % 360)}
-          className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center gap-1 transition"
-          title="Sağa 45° Döndür"
+          className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center gap-0.5 transition"
+          title="+45° Döndür"
         >
           <RotateCw className="w-3.5 h-3.5 text-indigo-400" /> +45°
         </button>
         <button
+          onClick={() => setRotationAngle((prev) => (prev + 90) % 360)}
+          className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded flex items-center gap-0.5 transition"
+          title="+90° Döndür"
+        >
+          <RotateCw className="w-3.5 h-3.5 text-indigo-400" /> +90°
+        </button>
+        <button
           onClick={() => setRotationAngle(0)}
           className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded flex items-center transition"
-          title="Açıyı Sıfırla"
+          title="Açıyı Sıfırla (0°)"
         >
           <RefreshCw className="w-3.5 h-3.5" />
         </button>
-        <span className="font-mono text-[11px] text-amber-400 ml-1">{rotationAngle}°</span>
+        <span className="font-mono text-[11px] text-amber-400 ml-1 font-semibold">{rotationAngle}°</span>
       </div>
     </div>
   );
