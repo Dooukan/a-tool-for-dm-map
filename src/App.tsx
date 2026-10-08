@@ -12,6 +12,7 @@ import type {
 import { DEFAULT_BIOMES } from './constants/biomes';
 import { generateWorld } from './utils/worldGenerator';
 import { MapCanvas } from './components/MapCanvas';
+import { GlobeCanvas } from './components/GlobeCanvas';
 import { TileHoverCard } from './components/TileHoverCard';
 import { CustomBiomeEditor } from './components/CustomBiomeEditor';
 import { FactionManager } from './components/FactionManager';
@@ -31,9 +32,15 @@ import {
   Sliders,
   Sparkles,
   MapPin,
+  Globe,
+  Grid,
+  Mountain,
 } from 'lucide-react';
 
 export function App() {
+  // Map View Mode: '2d' Hex Grid or '3d' Globe
+  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
+
   // Map Config State
   const [config, setConfig] = useState<MapConfig>({
     width: 32,
@@ -45,6 +52,12 @@ export function App() {
     humidityScale: 1.0,
     riverCount: 5,
     poiCount: 18,
+    octaves: 4,
+    persistence: 0.5,
+    lacunarity: 2.0,
+    useTectonics: true,
+    plateCount: 8,
+    oceanicRatio: 0.6,
   });
 
   // Active Map Data State
@@ -193,15 +206,37 @@ export function App() {
     >
       {/* Sidebar Control Panel */}
       <aside className="w-80 bg-slate-900/95 border-r border-slate-800 flex flex-col z-30 shadow-2xl backdrop-blur">
-        {/* Header Title */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
-          <div className="flex items-center gap-2">
-            <Compass className="w-6 h-6 text-indigo-400" />
-            <h1 className="font-bold text-slate-100 text-base tracking-wide">D&D World Engine</h1>
+        {/* Header Title & View Toggle */}
+        <div className="p-4 border-b border-slate-800 flex flex-col gap-3 bg-slate-950/60">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Compass className="w-6 h-6 text-indigo-400" />
+              <h1 className="font-bold text-slate-100 text-base tracking-wide">D&D World Engine</h1>
+            </div>
+            <span className="text-[10px] bg-indigo-950 border border-indigo-800 text-indigo-300 px-2 py-0.5 rounded font-mono">
+              v2.0 (Tectonic & 3D)
+            </span>
           </div>
-          <span className="text-[10px] bg-indigo-950 border border-indigo-800 text-indigo-300 px-2 py-0.5 rounded font-mono">
-            v1.3 (Rectangular)
-          </span>
+
+          {/* 2D Grid / 3D Globe View Mode Switcher */}
+          <div className="grid grid-cols-2 gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800 text-xs">
+            <button
+              onClick={() => setViewMode('2d')}
+              className={`py-1.5 px-2 rounded font-medium flex items-center justify-center gap-1.5 transition ${
+                viewMode === '2d' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Grid className="w-3.5 h-3.5" /> 2D Hex
+            </button>
+            <button
+              onClick={() => setViewMode('3d')}
+              className={`py-1.5 px-2 rounded font-medium flex items-center justify-center gap-1.5 transition ${
+                viewMode === '3d' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Globe className="w-3.5 h-3.5" /> 3D Globe
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Settings */}
@@ -229,6 +264,14 @@ export function App() {
                 Topografik
               </button>
               <button
+                onClick={() => setLayerMode('tectonic')}
+                className={`py-1.5 px-2 rounded font-medium transition ${
+                  layerMode === 'tectonic' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Tektonik
+              </button>
+              <button
                 onClick={() => setLayerMode('political')}
                 className={`py-1.5 px-2 rounded font-medium transition ${
                   layerMode === 'political' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
@@ -252,14 +295,112 @@ export function App() {
               >
                 Nem
               </button>
-              <button
-                onClick={() => setLayerMode('movement')}
-                className={`py-1.5 px-2 rounded font-medium transition ${
-                  layerMode === 'movement' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Hareket Maliyeti
-              </button>
+            </div>
+          </div>
+
+          {/* Tectonic Plate Simulation Settings */}
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Mountain className="w-4 h-4 text-emerald-400" /> Tektonik Plaka Simülasyonu
+              </label>
+              <input
+                type="checkbox"
+                checked={config.useTectonics}
+                onChange={(e) => setConfig({ ...config, useTectonics: e.target.checked })}
+                className="accent-indigo-600 w-4 h-4 cursor-pointer"
+              />
+            </div>
+
+            {config.useTectonics && (
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-2 text-xs">
+                <div>
+                  <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                    <span>Plaka Sayısı:</span>
+                    <span className="font-mono text-indigo-400">{config.plateCount}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="3"
+                    max="16"
+                    value={config.plateCount}
+                    onChange={(e) => setConfig({ ...config, plateCount: parseInt(e.target.value) })}
+                    className="w-full accent-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                    <span>Okyanusal Plaka Oranı:</span>
+                    <span className="font-mono text-indigo-400">{Math.round(config.oceanicRatio * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.2"
+                    max="0.8"
+                    step="0.05"
+                    value={config.oceanicRatio}
+                    onChange={(e) => setConfig({ ...config, oceanicRatio: parseFloat(e.target.value) })}
+                    className="w-full accent-indigo-500"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Fractal Noise Octaves Settings */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4 text-indigo-400" /> Fraktal / Oktav Gürültü (FBM)
+            </label>
+
+            <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-2.5 text-xs">
+              <div>
+                <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                  <span>Oktav Detay Sayısı (Octaves):</span>
+                  <span className="font-mono text-indigo-400">{config.octaves}</span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="6"
+                  value={config.octaves}
+                  onChange={(e) => setConfig({ ...config, octaves: parseInt(e.target.value) })}
+                  className="w-full accent-indigo-500"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                  <span>Kalıcılık (Persistence):</span>
+                  <span className="font-mono text-indigo-400">{config.persistence}</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.2"
+                  max="0.8"
+                  step="0.05"
+                  value={config.persistence}
+                  onChange={(e) => setConfig({ ...config, persistence: parseFloat(e.target.value) })}
+                  className="w-full accent-indigo-500"
+                />
+              </div>
+
+              <div>
+                <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                  <span>Frekans Çarpanı (Lacunarity):</span>
+                  <span className="font-mono text-indigo-400">{config.lacunarity}</span>
+                </div>
+                <input
+                  type="range"
+                  min="1.5"
+                  max="3.5"
+                  step="0.1"
+                  value={config.lacunarity}
+                  onChange={(e) => setConfig({ ...config, lacunarity: parseFloat(e.target.value) })}
+                  className="w-full accent-indigo-500"
+                />
+              </div>
             </div>
           </div>
 
@@ -443,10 +584,10 @@ export function App() {
             )}
           </div>
 
-          {/* Seed & Perlin Noise Generator Settings */}
+          {/* Seed & General Config */}
           <div className="space-y-3">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-indigo-400" /> Perlin Noise Harita Üretici
+              <Compass className="w-4 h-4 text-indigo-400" /> Harita Boyut & Seed
             </label>
 
             <div className="space-y-2 text-xs">
@@ -483,7 +624,7 @@ export function App() {
 
               <div>
                 <label className="block text-[10px] text-slate-400 mb-1 flex items-center gap-1">
-                  <MapPin className="w-3 h-3 text-indigo-400" /> Hedef Yerleşim / Node Sayısı (Sınırsız Tam Sayı)
+                  <MapPin className="w-3 h-3 text-indigo-400" /> Hedef Yerleşim / Node Sayısı
                 </label>
                 <input
                   type="number"
@@ -519,25 +660,39 @@ export function App() {
         </div>
       </aside>
 
-      {/* Main Interactive Canvas Area */}
+      {/* Main Interactive Canvas Area (2D Hex or 3D Globe View) */}
       <main className="flex-1 relative">
-        <MapCanvas
-          tiles={mapData.tiles}
-          biomes={biomes}
-          factions={factions}
-          tokens={tokens}
-          layerMode={layerMode}
-          hexSize={config.hexSize}
-          width={config.width}
-          height={config.height}
-          selectedTileKey={selectedTileKey}
-          hoveredTile={hoveredTile}
-          pathHexes={pathHexes}
-          activeBrush={activeBrush}
-          brushColor={activeBrush === 'biome' ? biomes.find((b) => b.id === selectedBrushBiome)?.color || '' : ''}
-          onTileHover={setHoveredTile}
-          onTileClick={handleTileClick}
-        />
+        {viewMode === '2d' ? (
+          <MapCanvas
+            tiles={mapData.tiles}
+            biomes={biomes}
+            factions={factions}
+            tokens={tokens}
+            layerMode={layerMode}
+            hexSize={config.hexSize}
+            width={config.width}
+            height={config.height}
+            selectedTileKey={selectedTileKey}
+            hoveredTile={hoveredTile}
+            pathHexes={pathHexes}
+            activeBrush={activeBrush}
+            brushColor={activeBrush === 'biome' ? biomes.find((b) => b.id === selectedBrushBiome)?.color || '' : ''}
+            onTileHover={setHoveredTile}
+            onTileClick={handleTileClick}
+          />
+        ) : (
+          <GlobeCanvas
+            tiles={mapData.tiles}
+            biomes={biomes}
+            factions={factions}
+            layerMode={layerMode}
+            width={config.width}
+            height={config.height}
+            selectedTileKey={selectedTileKey}
+            onTileHover={setHoveredTile}
+            onTileClick={handleTileClick}
+          />
+        )}
 
         {/* Tile Stats Hover Tooltip */}
         <TileHoverCard tile={hoveredTile} biomes={biomes} x={mousePos.x} y={mousePos.y} />

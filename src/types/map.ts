@@ -1,6 +1,13 @@
 export type HexPoint = { q: number; r: number }; // Axial coordinates
 
-export type MapLayerMode = 'biome' | 'topographic' | 'political' | 'temperature' | 'humidity' | 'movement';
+export type MapLayerMode =
+  | 'biome'
+  | 'topographic'
+  | 'tectonic'
+  | 'political'
+  | 'temperature'
+  | 'humidity'
+  | 'movement';
 
 export type POIType = 'city' | 'town' | 'village' | 'camp' | 'cave' | 'dungeon';
 
@@ -72,6 +79,8 @@ export interface TileData {
   poi?: POI;
   customColor?: string;
   customIcon?: string;
+  plateId?: number;
+  tectonicStress?: number;
 }
 
 export interface MapConfig {
@@ -84,4 +93,12 @@ export interface MapConfig {
   humidityScale: number;
   riverCount: number;
   poiCount: number;
+  // Fractal Noise Parameters (FBM)
+  octaves: number;
+  persistence: number;
+  lacunarity: number;
+  // Tectonic Plate Parameters
+  useTectonics: boolean;
+  plateCount: number;
+  oceanicRatio: number;
 }

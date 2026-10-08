@@ -3,6 +3,31 @@ import alea from 'alea';
 import type { CustomBiome, MapConfig, POI, POIType, TileData } from '../types/map';
 import { DEFAULT_BIOMES } from '../constants/biomes';
 import { getHexNeighbors, hexDistance, offsetToAxial } from './hexMath';
+import { simulateTectonics } from './tectonics';
+
+// Multi-octave Fractal Brownian Motion (FBM) noise function
+function fbm2D(
+  noiseFn: (x: number, y: number) => number,
+  x: number,
+  y: number,
+  octaves: number,
+  persistence: number,
+  lacunarity: number
+): number {
+  let total = 0;
+  let frequency = 1;
+  let amplitude = 1;
+  let maxValue = 0;
+
+  for (let i = 0; i < octaves; i++) {
+    total += noiseFn(x * frequency, y * frequency) * amplitude;
+    maxValue += amplitude;
+    amplitude *= persistence;
+    frequency *= lacunarity;
+  }
+
+  return (total / maxValue + 1) / 2; // Normalize 0.0 to 1.0
+}
 
 export function generateWorld(
   config: MapConfig,
@@ -14,45 +39,85 @@ export function generateWorld(
   const humidityNoise = createNoise2D(prng);
 
   const tiles = new Map<string, TileData>();
-
-  // Helper key generator
   const getKey = (q: number, r: number) => `${q},${r}`;
 
   const cols = config.width;
   const rows = config.height;
 
-  // 1. Generate 3-layer Perlin/Simplex noise in a Rectangular Offset Grid
+  // 1. Simulate Tectonic Plates if enabled
+  const octaves = config.octaves || 4;
+  const persistence = config.persistence || 0.5;
+  const lacunarity = config.lacunarity || 2.0;
+
+  let tectonicData = null;
+  if (config.useTectonics) {
+    tectonicData = simulateTectonics(
+      cols,
+      rows,
+      config.plateCount || 8,
+      config.oceanicRatio || 0.6,
+      config.seed,
+      offsetToAxial
+    );
+  }
+
+  // 2. Generate 3-layer Fractal Noise for Elevation, Temperature, Humidity
   for (let col = 0; col < cols; col++) {
     for (let row = 0; row < rows; row++) {
       const { q, r } = offsetToAxial(col, row);
+      const tileKey = getKey(q, r);
 
       const nx = col / cols;
       const ny = row / rows;
 
-      const scaleE = config.elevationScale * 5.0;
-      let elev =
-        1.0 * elevationNoise(nx * scaleE, ny * scaleE) +
-        0.5 * elevationNoise(nx * scaleE * 2, ny * scaleE * 2) +
-        0.25 * elevationNoise(nx * scaleE * 4, ny * scaleE * 4);
-      elev = (elev + 1.5) / 3.0;
-      elev = Math.max(0, Math.min(1, elev));
+      // Fractal Brownian Motion for Elevation
+      const scaleE = config.elevationScale * 4.0;
+      let elev = fbm2D(
+        elevationNoise,
+        nx * scaleE,
+        ny * scaleE,
+        octaves,
+        persistence,
+        lacunarity
+      );
 
-      const scaleT = config.temperatureScale * 5.0;
-      let temp =
-        1.0 * tempNoise((nx + 100) * scaleT, (ny + 100) * scaleT) +
-        0.5 * tempNoise((nx + 100) * scaleT * 2, (ny + 100) * scaleT * 2);
-      temp = (temp + 1.5) / 3.0;
+      // Apply Tectonic Plate Elevation Delta if active
+      let plateId: number | undefined = undefined;
+      let stress: number | undefined = undefined;
+
+      if (tectonicData) {
+        plateId = tectonicData.plateMap.get(tileKey);
+        stress = tectonicData.stressMap.get(tileKey);
+        const elevDelta = tectonicData.elevationModifierMap.get(tileKey) || 0;
+        elev = Math.max(0, Math.min(1, elev * 0.6 + elevDelta + 0.2));
+      }
+
+      // Temperature FBM
+      const scaleT = config.temperatureScale * 4.0;
+      let temp = fbm2D(
+        tempNoise,
+        (nx + 100) * scaleT,
+        (ny + 100) * scaleT,
+        Math.max(1, octaves - 1),
+        persistence,
+        lacunarity
+      );
 
       // Latitude gradient (colder at row 0 and row max, warmer in middle)
       const latFactor = 1.0 - Math.abs(ny - 0.5) * 2;
       temp = temp * 0.7 + latFactor * 0.3;
       temp = Math.max(0, Math.min(1, temp));
 
-      const scaleH = config.humidityScale * 5.0;
-      let hum =
-        1.0 * humidityNoise((nx + 500) * scaleH, (ny + 500) * scaleH) +
-        0.5 * humidityNoise((nx + 500) * scaleH * 2, (ny + 500) * scaleH * 2);
-      hum = (hum + 1.5) / 3.0;
+      // Humidity FBM
+      const scaleH = config.humidityScale * 4.0;
+      let hum = fbm2D(
+        humidityNoise,
+        (nx + 500) * scaleH,
+        (ny + 500) * scaleH,
+        Math.max(1, octaves - 1),
+        persistence,
+        lacunarity
+      );
       hum = Math.max(0, Math.min(1, hum));
 
       // Fertility formula
@@ -62,7 +127,7 @@ export function generateWorld(
       // Match biome
       const biome = matchBiome(elev, temp, hum, customBiomes);
 
-      tiles.set(getKey(q, r), {
+      tiles.set(tileKey, {
         q,
         r,
         elevation: elev,
@@ -73,14 +138,16 @@ export function generateWorld(
         movementCost: biome.movementCost,
         hasRiver: false,
         riverDirections: [],
+        plateId,
+        tectonicStress: stress,
       });
     }
   }
 
-  // 2. Downhill River Generation
+  // 3. Downhill River Generation
   generateRivers(tiles, config, prng);
 
-  // 3. Distance-Maximizing & Repelling POI Placement
+  // 4. Distance-Maximizing & Repelling POI Placement
   const pois = generatePOIs(tiles, config);
 
   return { tiles, pois };
