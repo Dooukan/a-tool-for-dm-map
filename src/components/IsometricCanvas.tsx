@@ -140,7 +140,7 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
       const elevationOffset = tile.elevation * maxExtrusion;
       const prismHeight = baseColumnHeight + elevationOffset;
 
-      // 1. Calculate 6 top surface vertices projected into isometric 3D space
+      // Calculate 6 top surface outer vertices (60° interval equilateral triangles around center)
       const topVertices: { x: number; y: number }[] = [];
       for (let i = 0; i < 6; i++) {
         const angleRad = (i * Math.PI) / 3; // Flat-topped hex angles: 0°, 60°, 120°, 180°, 240°, 300°
@@ -211,22 +211,21 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
         }
       }
 
-      // Draw Extruded 3D Hexagonal Column Side Walls (front-facing faces)
+      // Draw Extruded 3D Hexagonal Column Side Walls (exactly 2 or 3 visible front-facing faces)
       for (let i = 0; i < 6; i++) {
         const nextI = (i + 1) % 6;
         const p1 = topVertices[i];
         const p2 = topVertices[nextI];
         const dx = p2.x - p1.x;
-        const dy = p2.y - p1.y;
 
-        // In 2D screen projection, side faces with dx > 0 face towards the camera (clockwise winding order)
-        if (dx > 0.001) {
+        // Optimized face culling: Only 2 or 3 front-facing faces (where dx > 0.0001) are visible to camera
+        if (dx > 0.0001) {
           const p3 = { x: p2.x, y: p2.y + prismHeight };
           const p4 = { x: p1.x, y: p1.y + prismHeight };
 
-          // Directional normal lighting calculation
-          const wallAngle = Math.atan2(dy, dx);
-          const lightFactor = Math.max(0.35, Math.min(0.85, 0.6 + 0.35 * Math.sin(wallAngle)));
+          // Directional normal lighting calculation based on world face normal & camera angle
+          const faceWorldAngle = (i * Math.PI) / 3 + Math.PI / 6 + rad;
+          const lightFactor = Math.max(0.35, Math.min(0.88, 0.62 + 0.32 * Math.cos(faceWorldAngle - Math.PI / 4)));
           const sideColor = adjustColorBrightness(fillColor, lightFactor);
 
           ctx.beginPath();
@@ -243,7 +242,7 @@ export const IsometricCanvas: React.FC<IsometricCanvasProps> = ({
         }
       }
 
-      // Draw Top Hex Surface (Flat-topped hex projected into Isometric plane)
+      // Draw Top Hex Surface (assembled from center pivot and 6 outer vertices)
       ctx.beginPath();
       ctx.moveTo(topVertices[0].x, topVertices[0].y);
       for (let i = 1; i < 6; i++) {
